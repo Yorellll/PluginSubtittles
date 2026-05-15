@@ -1,0 +1,3 @@
+# Official NVIDIA NeMo backend for Parakeet v3.
+# Best on NVIDIA GPUs with a compatible PyTorch/CUDA install.
+nemo_toolkit[asr]>=2.0.0

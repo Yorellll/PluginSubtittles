@@ -1,0 +1,3 @@
+# Apple Silicon backend for Parakeet v3.
+# Install this on macOS arm64 when you want local MLX inference.
+parakeet-mlx>=0.4.0

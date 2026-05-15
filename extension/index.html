@@ -1,0 +1,77 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <title>Gros Pouce Subtitles</title>
+    <link rel="stylesheet" href="./css/styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="header">
+        <div>
+          <h1>Gros Pouce</h1>
+          <p>Parakeet v3 local subtitles</p>
+        </div>
+        <button id="checkService" class="icon-button" title="Tester le service local">↻</button>
+      </header>
+
+      <section class="section">
+        <label class="label" for="serviceUrl">Service local</label>
+        <div class="row">
+          <input id="serviceUrl" value="http://127.0.0.1:47891" />
+          <span id="serviceStatus" class="status muted">Non testé</span>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-title">Source</div>
+        <div class="button-grid">
+          <button id="useSelectedClip">Clip sélectionné</button>
+          <button id="pickMedia">Choisir un fichier</button>
+        </div>
+        <div id="sourceInfo" class="source-box muted">Aucune source sélectionnée.</div>
+      </section>
+
+      <section class="section">
+        <div class="section-title">Sous-titres</div>
+        <div class="options-grid">
+          <label>
+            Caractères / ligne
+            <input id="maxLineChars" type="number" min="20" max="60" value="42" />
+          </label>
+          <label>
+            Lignes max
+            <input id="maxLines" type="number" min="1" max="3" value="2" />
+          </label>
+          <label>
+            Durée max
+            <input id="maxDuration" type="number" min="1" max="10" step="0.5" value="5.5" />
+          </label>
+          <label>
+            CPS max
+            <input id="maxCps" type="number" min="8" max="30" step="0.5" value="18" />
+          </label>
+        </div>
+        <label class="checkbox">
+          <input id="autoImport" type="checkbox" checked />
+          Importer automatiquement le SRT dans la séquence active
+        </label>
+      </section>
+
+      <section class="section">
+        <button id="generate" class="primary">Générer les sous-titres</button>
+        <button id="importLast" class="secondary" disabled>Importer le dernier SRT</button>
+        <div id="progress" class="progress muted">En attente.</div>
+      </section>
+
+      <section class="section log-section">
+        <div class="section-title">Journal</div>
+        <pre id="log"></pre>
+      </section>
+    </main>
+
+    <script src="./js/CSInterface.js"></script>
+    <script src="./js/main.js"></script>
+  </body>
+</html>
