@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import threading
 import uuid
@@ -13,11 +14,12 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from .media import MediaError, ensure_ffmpeg, extract_audio_to_wav
-from .parakeet import BackendUnavailable, create_backend
+from .media import MediaError, ensure_ffmpeg, extract_audio_to_wav, get_wav_duration_seconds
+from .parakeet import BackendUnavailable, create_backend, unload_backend_instance
 from .subtitles import (
     SourceCue,
     SubtitleOptions,
+    WordStamp,
     build_cues_from_segments,
     build_cues_from_words,
     cues_to_srt,
@@ -78,6 +80,11 @@ class BatchJobRequest(BaseModel):
     source_items: list[SourceItem]
 
 
+class BackendSelectionRequest(BaseModel):
+    backend: str = "nemo"
+    preload: bool = True
+
+
 class JobResponse(BaseModel):
     job_id: str
 
@@ -87,6 +94,7 @@ _jobs: dict[str, dict[str, Any]] = {}
 _jobs_lock = threading.Lock()
 _backend_lock = threading.Lock()
 _backend_cache: dict[tuple[str, str | None], Any] = {}
+_selected_backend_name = "nemo"
 
 
 def _set_job(job_id: str, **updates: Any) -> None:
@@ -95,11 +103,38 @@ def _set_job(job_id: str, **updates: Any) -> None:
 
 
 def _get_backend(preferred: str, model_id: str | None):
-    key = ((preferred or "auto").lower(), model_id)
+    requested = (preferred or "auto").lower()
+    if requested == "auto":
+        requested = _selected_backend_name
+    key = (requested, model_id)
     with _backend_lock:
+        stale_keys = [cache_key for cache_key in _backend_cache if cache_key != key]
+        for stale_key in stale_keys:
+            unload_backend_instance(_backend_cache.pop(stale_key, None))
         if key not in _backend_cache:
             _backend_cache[key] = create_backend(preferred=key[0], model_id=model_id)
         return _backend_cache[key]
+
+
+def _select_backend(backend_name: str, preload: bool) -> dict[str, Any]:
+    global _selected_backend_name
+    normalized = (backend_name or "nemo").lower()
+    if normalized not in ("nemo", "whisper", "mlx", "auto"):
+        raise HTTPException(status_code=400, detail=f"Backend inconnu: {backend_name}")
+    if normalized == "auto":
+        normalized = "nemo"
+
+    with _backend_lock:
+        _selected_backend_name = normalized
+        for cache_key in list(_backend_cache.keys()):
+            unload_backend_instance(_backend_cache.pop(cache_key, None))
+        if preload:
+            _backend_cache[(normalized, None)] = create_backend(preferred=normalized, model_id=None)
+
+    return {
+        "selected_backend": _selected_backend_name,
+        "loaded_backends": [f"{backend.name}:{backend.model_id}" for backend in _backend_cache.values()],
+    }
 
 
 def _output_paths(media_path: str, output_dir: str | None) -> tuple[Path, Path]:
@@ -129,6 +164,20 @@ def _build_cues_from_result(result: Any, options: SubtitleOptions) -> list[Any]:
     return cues
 
 
+def _fallback_segment_from_text(text: str, audio_duration_seconds: float) -> list[Any]:
+    cleaned = " ".join((text or "").split())
+    if not cleaned:
+        return []
+    duration = max(0.75, float(audio_duration_seconds or 0.0))
+    return [
+        {
+            "text": cleaned,
+            "start": 0.0,
+            "end": duration,
+        }
+    ]
+
+
 def _transcribe_source_item(
     backend: Any,
     source_item: SourceItem,
@@ -150,13 +199,30 @@ def _transcribe_source_item(
             trim_start_seconds=source_item.trim_start_seconds,
             trim_end_seconds=source_item.trim_end_seconds,
         )
+        wav_duration_seconds = get_wav_duration_seconds(wav_path)
         result = backend.transcribe(
             wav_path,
             chunk_duration=chunk_duration,
             overlap_duration=overlap_duration,
         )
 
-    cues = _build_cues_from_result(result, options)
+    try:
+        cues = _build_cues_from_result(result, options)
+    except RuntimeError:
+        fallback_segments = _fallback_segment_from_text(getattr(result, "text", ""), wav_duration_seconds)
+        if not fallback_segments:
+            raise
+        cues = build_cues_from_segments(
+            [
+                WordStamp(
+                    start=float(segment["start"]),
+                    end=float(segment["end"]),
+                    text=str(segment["text"]),
+                )
+                for segment in fallback_segments
+            ],
+            options,
+        )
     shifted = shift_cues(
         cues,
         source_item.timeline_offset_seconds,
@@ -215,6 +281,20 @@ def _merge_aggregate(
 
     merged_cues = kept_cues + [asdict(cue) for cue in new_cues]
     merged_clips = kept_clips + clip_metadata
+    deduped_cues: list[dict[str, Any]] = []
+    seen_cues: set[tuple[str, float, float, str]] = set()
+    for cue in merged_cues:
+        cue_key = (
+            str(cue["clip_key"]),
+            round(float(cue["start"]), 3),
+            round(float(cue["end"]), 3),
+            str(cue["text"]),
+        )
+        if cue_key in seen_cues:
+            continue
+        seen_cues.add(cue_key)
+        deduped_cues.append(cue)
+
     source_cues = [
         SourceCue(
             clip_key=str(cue["clip_key"]),
@@ -223,7 +303,7 @@ def _merge_aggregate(
             end=float(cue["end"]),
             text=str(cue["text"]),
         )
-        for cue in merged_cues
+        for cue in deduped_cues
     ]
     subtitle_cues = source_cues_to_subtitle_cues(source_cues)
     srt_path.write_text(cues_to_srt(subtitle_cues), encoding="utf-8")
@@ -380,8 +460,32 @@ def health() -> dict[str, Any]:
         "ffmpeg_ok": ffmpeg_ok,
         "ffmpeg_path": ffmpeg_path,
         "ffmpeg_error": ffmpeg_error,
+        "selected_backend": _selected_backend_name,
+        "available_backends": ["nemo", "whisper"],
         "loaded_backends": [f"{backend.name}:{backend.model_id}" for backend in _backend_cache.values()],
     }
+
+
+@app.post("/backend/select")
+def select_backend(request: BackendSelectionRequest) -> dict[str, Any]:
+    return _select_backend(request.backend, request.preload)
+
+
+@app.post("/backend/unload")
+def unload_backend() -> dict[str, Any]:
+    with _backend_lock:
+        for cache_key in list(_backend_cache.keys()):
+            unload_backend_instance(_backend_cache.pop(cache_key, None))
+    return {
+        "selected_backend": _selected_backend_name,
+        "loaded_backends": [],
+    }
+
+
+@app.post("/shutdown")
+def shutdown_service() -> dict[str, Any]:
+    threading.Timer(0.25, lambda: os._exit(0)).start()
+    return {"ok": True, "message": "Arret du service demande."}
 
 
 @app.post("/jobs", response_model=JobResponse)

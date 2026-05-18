@@ -78,6 +78,16 @@ input {
   outline: none;
 }
 
+select {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-soft);
+  color: var(--text);
+  padding: 8px 9px;
+  outline: none;
+}
+
 input:focus {
   border-color: var(--accent);
 }
@@ -129,6 +139,10 @@ button:disabled {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
+}
+
+.top-gap {
+  margin-top: 8px;
 }
 
 .options-grid label {

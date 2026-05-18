@@ -5,12 +5,19 @@
     lastSrtPath: null,
     activeJobId: null,
     pollTimer: null,
+    selectedBackend: localStorage.getItem("grosPouce.backend") || "nemo",
   };
 
   var el = {
     serviceUrl: document.getElementById("serviceUrl"),
     serviceStatus: document.getElementById("serviceStatus"),
     checkService: document.getElementById("checkService"),
+    workspacePath: document.getElementById("workspacePath"),
+    pickWorkspace: document.getElementById("pickWorkspace"),
+    startService: document.getElementById("startService"),
+    stopService: document.getElementById("stopService"),
+    backendSelect: document.getElementById("backendSelect"),
+    applyBackend: document.getElementById("applyBackend"),
     useSelectedClip: document.getElementById("useSelectedClip"),
     pickMedia: document.getElementById("pickMedia"),
     sourceInfo: document.getElementById("sourceInfo"),
@@ -28,6 +35,10 @@
   function log(message) {
     var time = new Date().toLocaleTimeString();
     el.log.textContent = "[" + time + "] " + message + "\n" + el.log.textContent;
+  }
+
+  function setStoredValue(key, value) {
+    localStorage.setItem(key, value || "");
   }
 
   function setProgress(message, className) {
@@ -89,6 +100,24 @@
     return el.serviceUrl.value.replace(/\/+$/, "");
   }
 
+  function getWorkspacePath() {
+    return (el.workspacePath.value || "").trim();
+  }
+
+  function getBackendCommand() {
+    var workspace = getWorkspacePath();
+    if (!workspace) return null;
+    return {
+      program: "powershell.exe",
+      args: [
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        workspace + "\\scripts\\start_server.ps1",
+      ],
+    };
+  }
+
   function renderSource() {
     if (!state.source) {
       el.sourceInfo.textContent = "Aucune source sélectionnée.";
@@ -141,9 +170,71 @@
         return;
       }
       setServiceStatus("OK", "ok");
+      state.selectedBackend = health.selected_backend || state.selectedBackend;
+      el.backendSelect.value = state.selectedBackend;
       log("Service local disponible.");
     } catch (error) {
       setServiceStatus("Hors ligne", "error");
+      log(error.message);
+    }
+  }
+
+  async function pickWorkspace() {
+    var result = await evalHost("pickFolder", []);
+    if (!result.ok) {
+      log(result.error);
+      return;
+    }
+    el.workspacePath.value = result.folderPath;
+    setStoredValue("grosPouce.workspacePath", result.folderPath);
+    log("Dossier du plugin défini.");
+  }
+
+  function launchLocalProcess(command) {
+    if (!window.cep || !window.cep.process || !window.cep.process.createProcess) {
+      throw new Error("CEP process API indisponible dans ce panneau.");
+    }
+    return window.cep.process.createProcess.apply(window.cep.process, [command.program].concat(command.args));
+  }
+
+  async function startService() {
+    var command = getBackendCommand();
+    if (!command) {
+      log("Définis d'abord le dossier du plugin.");
+      return;
+    }
+    try {
+      launchLocalProcess(command);
+      log("Commande de démarrage envoyée au backend.");
+      window.setTimeout(checkService, 2500);
+    } catch (error) {
+      log(error.message || String(error));
+    }
+  }
+
+  async function stopService() {
+    try {
+      await requestJson("POST", serviceBaseUrl() + "/shutdown", {});
+      setServiceStatus("Arrêt...", "warning");
+      log("Demande d'arrêt du backend envoyée.");
+      window.setTimeout(checkService, 1200);
+    } catch (error) {
+      log(error.message);
+    }
+  }
+
+  async function applyBackendSelection() {
+    var backend = el.backendSelect.value;
+    try {
+      var result = await requestJson("POST", serviceBaseUrl() + "/backend/select", {
+        backend: backend,
+        preload: true,
+      });
+      state.selectedBackend = result.selected_backend || backend;
+      setStoredValue("grosPouce.backend", state.selectedBackend);
+      el.backendSelect.value = state.selectedBackend;
+      log("Backend actif: " + state.selectedBackend);
+    } catch (error) {
       log(error.message);
     }
   }
@@ -218,7 +309,7 @@
           aggregate_key: state.source.aggregate_key,
           aggregate_label: state.source.aggregate_label,
           output_dir: outputDir,
-          backend: "auto",
+          backend: state.selectedBackend,
           subtitle_settings: currentSubtitleSettings(),
           source_items: state.source.clips.map(function (clip) {
             return {
@@ -234,7 +325,7 @@
       } else {
         created = await requestJson("POST", serviceBaseUrl() + "/jobs", {
           media_path: state.source.media_path,
-          backend: "auto",
+          backend: state.selectedBackend,
           subtitle_settings: currentSubtitleSettings(),
         });
       }
@@ -304,11 +395,17 @@
   }
 
   el.checkService.addEventListener("click", checkService);
+  el.pickWorkspace.addEventListener("click", pickWorkspace);
+  el.startService.addEventListener("click", startService);
+  el.stopService.addEventListener("click", stopService);
+  el.applyBackend.addEventListener("click", applyBackendSelection);
   el.useSelectedClip.addEventListener("click", useSelectedClip);
   el.pickMedia.addEventListener("click", pickMedia);
   el.generate.addEventListener("click", generate);
   el.importLast.addEventListener("click", importLast);
 
+  el.workspacePath.value = localStorage.getItem("grosPouce.workspacePath") || "";
+  el.backendSelect.value = state.selectedBackend;
   renderSource();
   checkService();
 })();

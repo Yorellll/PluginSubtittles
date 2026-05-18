@@ -1,6 +1,7 @@
 param(
     [string]$Python = "py",
-    [string]$TorchIndexUrl = "https://download.pytorch.org/whl/cu126"
+    [string]$TorchIndexUrl = "https://download.pytorch.org/whl/cu126",
+    [switch]$IncludeWhisper
 )
 
 $ErrorActionPreference = "Stop"
@@ -25,6 +26,9 @@ Write-Host "Installing PyTorch from $TorchIndexUrl"
 Write-Host "Installing backend dependencies"
 & $PythonExe -m pip install -r (Join-Path $Root "requirements-base.txt")
 & $PythonExe -m pip install -r (Join-Path $Root "requirements-nemo.txt")
+if ($IncludeWhisper) {
+    & $PythonExe -m pip install -r (Join-Path $Root "requirements-whisper.txt")
+}
 
 Write-Host ""
 Write-Host "Done. Start the service with:"

@@ -1,6 +1,6 @@
 # Gros Pouce Subtitles
 
-Plugin Premiere Pro pour générer des sous-titres localement avec NVIDIA Parakeet TDT 0.6B v3.
+Plugin Premiere Pro pour generer des sous-titres localement avec NVIDIA Parakeet TDT 0.6B v3 ou faster-whisper.
 
 Architecture :
 
@@ -42,6 +42,12 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .\scripts\setup_windows_nemo.ps1
 ```
 
+Pour installer aussi faster-whisper :
+
+```powershell
+.\scripts\setup_windows_nemo.ps1 -IncludeWhisper
+```
+
 Les deux lignes doivent etre executees separement. En une seule ligne, utilise un point-virgule :
 
 ```powershell
@@ -67,7 +73,7 @@ Dans Premiere Pro :
 3. Sélectionne un ou plusieurs clips dans la timeline, ou choisis un fichier vidéo/audio.
 4. Clique `Générer les sous-titres`.
 
-Le panneau appelle `http://127.0.0.1:47891`, génère un `.srt`, l'importe dans le projet, puis crée une piste de sous-titres dans la séquence active.
+Le panneau appelle `http://127.0.0.1:47891`, genere un `.srt`, l'importe dans le projet, puis cree une piste de sous-titres dans la sequence active.
 
 ## Fusion par sequence
 
@@ -76,8 +82,19 @@ Quand tu lances une generation depuis des clips selectionnes dans une sequence, 
 - tous les clips selectionnes dans un meme lancement sont fusionnes dans un seul `.srt` et un seul `.json`
 - si tu regeneres plus tard un autre clip de cette meme sequence, il est ajoute au meme agregat
 - si tu regeneres un clip deja traite avec les memes bornes timeline/source, ses anciennes cues sont remplacees dans l'agregat
+- la selection Premiere est dedupliquee pour eviter les doublons audio/video lies dans le `.srt`
 
 Le fichier final est nomme d'apres la sequence, par exemple `Ma_Sequence.parakeet.srt`.
+
+## Pilotage depuis le panneau
+
+Le panneau peut maintenant :
+
+- demarrer le backend si tu renseignes le chemin du repo plugin
+- arreter le backend
+- choisir entre `NeMo / Parakeet` et `faster-whisper`
+
+Quand tu changes de moteur et que tu cliques `Charger`, le backend vide le modele actuellement charge avant de precharger l'autre.
 
 ## Recommandation Windows sincère
 
@@ -87,6 +104,7 @@ NeMo est l'implémentation officielle pour `nvidia/parakeet-tdt-0.6b-v3`, mais s
 
 - Le mode `Clips selectionnes` transcrit chaque fichier source individuellement et recale les sous-titres sur la timeline.
 - Les generations successives fusionnent les contenus dans un seul agregat, mais l'import Premiere cree encore une nouvelle piste captions a chaque import.
+- Le demarrage du backend depuis Premiere depend du chemin du repo renseigne dans le panneau.
 - Pour une sequence complete avec beaucoup de coupes, un export audio/video unique peut rester plus simple que la selection manuelle de dizaines de clips.
 - Pas encore de diarisation.
 - Le premier lancement telecharge le modele Parakeet et peut prendre du temps.

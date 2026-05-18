@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import wave
 from pathlib import Path
 
 
@@ -51,3 +52,16 @@ def extract_audio_to_wav(
         detail = result.stderr.strip() or result.stdout.strip() or "erreur ffmpeg inconnue"
         raise MediaError(f"Extraction audio echouee: {detail}")
     return output_path
+
+
+def get_wav_duration_seconds(wav_path: str) -> float:
+    path = Path(wav_path)
+    if not path.exists():
+        raise MediaError(f"Fichier wav introuvable: {wav_path}")
+
+    with wave.open(str(path), "rb") as wav_file:
+        frame_rate = wav_file.getframerate()
+        frame_count = wav_file.getnframes()
+        if frame_rate <= 0:
+            return 0.0
+        return float(frame_count) / float(frame_rate)

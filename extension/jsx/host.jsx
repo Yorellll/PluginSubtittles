@@ -89,6 +89,17 @@ var GrosPouce = GrosPouce || {};
         });
     };
 
+    GrosPouce.pickFolder = function () {
+        var folder = Folder.selectDialog("Choisir le dossier du plugin");
+        if (!folder) {
+            return fail("Aucun dossier sélectionné.");
+        }
+        return json({
+            ok: true,
+            folderPath: folder.fsName
+        });
+    };
+
     GrosPouce.getSelectedClipInfo = function () {
         try {
             var seq = app.project.activeSequence;
@@ -102,6 +113,7 @@ var GrosPouce = GrosPouce || {};
             }
 
             var clips = [];
+            var seenClipKeys = {};
             for (var i = 0; i < selection.length; i++) {
                 var item = selection[i];
                 if (!item || !item.projectItem) {
@@ -125,6 +137,11 @@ var GrosPouce = GrosPouce || {};
                     sourceIn || 0,
                     sourceOut || 0
                 ].join("__");
+
+                if (seenClipKeys[clipKey]) {
+                    continue;
+                }
+                seenClipKeys[clipKey] = true;
 
                 clips.push({
                     clipKey: clipKey,

@@ -22,6 +22,25 @@
           <input id="serviceUrl" value="http://127.0.0.1:47891" />
           <span id="serviceStatus" class="status muted">Non testé</span>
         </div>
+        <div class="row top-gap">
+          <input id="workspacePath" placeholder="Chemin du repo plugin (pour start/stop)" />
+          <button id="pickWorkspace" title="Choisir le dossier du projet">…</button>
+        </div>
+        <div class="button-grid top-gap">
+          <button id="startService">Démarrer backend</button>
+          <button id="stopService">Arrêter backend</button>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-title">Moteur</div>
+        <div class="row">
+          <select id="backendSelect">
+            <option value="nemo">NeMo / Parakeet</option>
+            <option value="whisper">faster-whisper</option>
+          </select>
+          <button id="applyBackend">Charger</button>
+        </div>
       </section>
 
       <section class="section">
