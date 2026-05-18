@@ -95,18 +95,26 @@
       el.sourceInfo.className = "source-box muted";
       return;
     }
-    var lines = [
-      state.source.mode === "clip" ? "Clip sélectionné" : "Fichier local",
-      state.source.media_path,
-    ];
-    if (state.source.mode === "clip") {
-      lines.push("Début timeline: " + state.source.sequence_start_seconds.toFixed(3) + "s");
-      if (typeof state.source.trim_start_seconds === "number") {
-        lines.push("In source: " + state.source.trim_start_seconds.toFixed(3) + "s");
-      }
-      if (typeof state.source.trim_end_seconds === "number") {
-        lines.push("Out source: " + state.source.trim_end_seconds.toFixed(3) + "s");
-      }
+    var lines = [];
+    if (state.source.mode === "clips") {
+      lines.push("Clips sélectionnés: " + state.source.clips.length);
+      lines.push("Séquence: " + state.source.aggregate_label);
+      state.source.clips.forEach(function (clip, index) {
+        lines.push(
+          (index + 1) +
+            ". " +
+            clip.name +
+            " | timeline " +
+            clip.sequence_start_seconds.toFixed(3) +
+            "s | source " +
+            (typeof clip.trim_start_seconds === "number" ? clip.trim_start_seconds.toFixed(3) : "0.000") +
+            " -> " +
+            (typeof clip.trim_end_seconds === "number" ? clip.trim_end_seconds.toFixed(3) : "?") +
+            "s"
+        );
+      });
+    } else {
+      lines = ["Fichier local", state.source.media_path];
     }
     el.sourceInfo.textContent = lines.join("\n");
     el.sourceInfo.className = "source-box";
@@ -147,14 +155,26 @@
       return;
     }
     state.source = {
-      mode: "clip",
-      media_path: result.mediaPath,
-      sequence_start_seconds: Number(result.sequenceStartSeconds || 0),
-      trim_start_seconds: result.sourceInSeconds,
-      trim_end_seconds: result.sourceOutSeconds,
+      mode: "clips",
+      aggregate_key: result.aggregateKey,
+      aggregate_label: result.aggregateLabel,
+      project_path: result.projectPath,
+      clips: (result.clips || []).map(function (clip) {
+        return {
+          clip_key: clip.clipKey,
+          media_path: clip.mediaPath,
+          name: clip.name,
+          sequence_start_seconds: Number(clip.sequenceStartSeconds || 0),
+          trim_start_seconds:
+            typeof clip.sourceInSeconds === "number" ? Number(clip.sourceInSeconds) : null,
+          trim_end_seconds:
+            typeof clip.sourceOutSeconds === "number" ? Number(clip.sourceOutSeconds) : null,
+        };
+      }),
+      import_offset_seconds: 0,
     };
     renderSource();
-    log("Source définie depuis le clip sélectionné.");
+    log("Source définie depuis la sélection timeline (" + state.source.clips.length + " clips).");
   }
 
   async function pickMedia() {
@@ -166,9 +186,7 @@
     state.source = {
       mode: "file",
       media_path: result.mediaPath,
-      sequence_start_seconds: 0,
-      trim_start_seconds: null,
-      trim_end_seconds: null,
+      import_offset_seconds: 0,
     };
     renderSource();
     log("Source définie depuis un fichier local.");
@@ -190,16 +208,36 @@
     state.lastSrtPath = null;
     el.importLast.disabled = true;
 
-    var payload = {
-      media_path: state.source.media_path,
-      backend: "auto",
-      trim_start_seconds: state.source.trim_start_seconds,
-      trim_end_seconds: state.source.trim_end_seconds,
-      subtitle_settings: currentSubtitleSettings(),
-    };
-
     try {
-      var created = await requestJson("POST", serviceBaseUrl() + "/jobs", payload);
+      var created;
+      if (state.source.mode === "clips") {
+        var outputDir = state.source.project_path
+          ? state.source.project_path.replace(/[\\/][^\\/]+$/, "")
+          : state.source.clips[0].media_path.replace(/[\\/][^\\/]+$/, "");
+        created = await requestJson("POST", serviceBaseUrl() + "/batch-jobs", {
+          aggregate_key: state.source.aggregate_key,
+          aggregate_label: state.source.aggregate_label,
+          output_dir: outputDir,
+          backend: "auto",
+          subtitle_settings: currentSubtitleSettings(),
+          source_items: state.source.clips.map(function (clip) {
+            return {
+              clip_key: clip.clip_key,
+              source_label: clip.name,
+              media_path: clip.media_path,
+              timeline_offset_seconds: clip.sequence_start_seconds,
+              trim_start_seconds: clip.trim_start_seconds,
+              trim_end_seconds: clip.trim_end_seconds,
+            };
+          }),
+        });
+      } else {
+        created = await requestJson("POST", serviceBaseUrl() + "/jobs", {
+          media_path: state.source.media_path,
+          backend: "auto",
+          subtitle_settings: currentSubtitleSettings(),
+        });
+      }
       state.activeJobId = created.job_id;
       log("Job lancé: " + state.activeJobId);
       pollJob();
@@ -221,7 +259,15 @@
         state.lastSrtPath = job.result.srt_path;
         el.importLast.disabled = false;
         setProgress("SRT généré: " + state.lastSrtPath, "ok");
-        log("Sous-titres générés (" + job.result.cue_count + " cues, " + job.result.backend + ").");
+        var generatedMessage =
+          "Sous-titres générés (" +
+          job.result.cue_count +
+          " cues";
+        if (job.result.clip_count) {
+          generatedMessage += ", " + job.result.clip_count + " clips agrégés";
+        }
+        generatedMessage += ").";
+        log(generatedMessage);
         if (el.autoImport.checked) {
           importLast();
         }
@@ -248,7 +294,7 @@
       log("Aucun SRT à importer.");
       return;
     }
-    var startAt = state.source ? Number(state.source.sequence_start_seconds || 0) : 0;
+    var startAt = state.source ? Number(state.source.import_offset_seconds || 0) : 0;
     var result = await evalHost("importSrtToActiveSequence", [jsxString(state.lastSrtPath), String(startAt)]);
     if (!result.ok) {
       log(result.error);

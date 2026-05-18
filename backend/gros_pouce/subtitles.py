@@ -21,6 +21,15 @@ class SubtitleCue:
 
 
 @dataclass(frozen=True)
+class SourceCue:
+    clip_key: str
+    source_label: str
+    start: float
+    end: float
+    text: str
+
+
+@dataclass(frozen=True)
 class SubtitleOptions:
     max_line_chars: int = 42
     max_lines: int = 2
@@ -202,3 +211,39 @@ def cues_to_srt(cues: Sequence[SubtitleCue]) -> str:
             )
         )
     return "\n\n".join(blocks) + ("\n" if blocks else "")
+
+
+def shift_cues(
+    cues: Iterable[SubtitleCue],
+    offset_seconds: float,
+    clip_key: str,
+    source_label: str,
+) -> list[SourceCue]:
+    shifted: list[SourceCue] = []
+    offset = float(offset_seconds or 0.0)
+    for cue in cues:
+        shifted.append(
+            SourceCue(
+                clip_key=clip_key,
+                source_label=source_label,
+                start=max(0.0, cue.start + offset),
+                end=max(0.0, cue.end + offset),
+                text=cue.text,
+            )
+        )
+    return shifted
+
+
+def source_cues_to_subtitle_cues(cues: Iterable[SourceCue]) -> list[SubtitleCue]:
+    ordered = sorted(cues, key=lambda cue: (cue.start, cue.end, cue.source_label, cue.clip_key))
+    subtitles: list[SubtitleCue] = []
+    for cue in ordered:
+        subtitles.append(
+            SubtitleCue(
+                index=len(subtitles) + 1,
+                start=cue.start,
+                end=cue.end,
+                text=cue.text,
+            )
+        )
+    return subtitles

@@ -17,6 +17,12 @@ var GrosPouce = GrosPouce || {};
         return File(path).name;
     }
 
+    function sanitizeKey(value) {
+        return String(value || "")
+            .replace(/[^A-Za-z0-9._-]+/g, "_")
+            .replace(/^_+|_+$/g, "");
+    }
+
     function safeSeconds(timeObject) {
         try {
             if (timeObject && typeof timeObject.seconds !== "undefined") {
@@ -95,6 +101,7 @@ var GrosPouce = GrosPouce || {};
                 return fail("Sélectionne un clip audio/vidéo dans la timeline.");
             }
 
+            var clips = [];
             for (var i = 0; i < selection.length; i++) {
                 var item = selection[i];
                 if (!item || !item.projectItem) {
@@ -111,10 +118,18 @@ var GrosPouce = GrosPouce || {};
                 var sequenceStart = safeSeconds(item.start);
                 var sequenceEnd = safeSeconds(item.end);
 
-                return json({
-                    ok: true,
+                var label = item.name || item.projectItem.name || fileNameFromPath(mediaPath);
+                var clipKey = [
+                    sanitizeKey(mediaPath),
+                    sequenceStart || 0,
+                    sourceIn || 0,
+                    sourceOut || 0
+                ].join("__");
+
+                clips.push({
+                    clipKey: clipKey,
                     mediaPath: mediaPath,
-                    name: item.name || item.projectItem.name || fileNameFromPath(mediaPath),
+                    name: label,
                     sequenceStartSeconds: sequenceStart || 0,
                     sequenceEndSeconds: sequenceEnd,
                     sourceInSeconds: sourceIn,
@@ -122,7 +137,27 @@ var GrosPouce = GrosPouce || {};
                 });
             }
 
-            return fail("Impossible de trouver un chemin média dans la sélection.");
+            if (!clips.length) {
+                return fail("Impossible de trouver un chemin média dans la sélection.");
+            }
+
+            clips.sort(function (a, b) {
+                return a.sequenceStartSeconds - b.sequenceStartSeconds;
+            });
+
+            var projectPath = null;
+            try {
+                projectPath = app.project.path || null;
+            } catch (error) {}
+
+            return json({
+                ok: true,
+                sequenceName: seq.name || "Sequence",
+                projectPath: projectPath,
+                aggregateKey: sanitizeKey((projectPath || "unsaved_project") + "__" + (seq.name || "sequence")),
+                aggregateLabel: sanitizeKey(seq.name || "sequence"),
+                clips: clips
+            });
         } catch (error) {
             return fail(error);
         }
