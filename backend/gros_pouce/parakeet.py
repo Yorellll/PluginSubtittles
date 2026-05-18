@@ -199,17 +199,27 @@ class FasterWhisperBackend(BaseParakeetBackend):
             ) from exc
 
         device = "cpu"
-        compute_type = "int8"
+        compute_types: list[str] = ["int8"]
         try:
             import torch
 
             if torch.cuda.is_available():
                 device = "cuda"
-                compute_type = "float16"
+                compute_types = ["float16", "int8_float16", "int8", "float32"]
         except Exception:
             pass
 
-        self.model = WhisperModel(self.model_id, device=device, compute_type=compute_type)
+        errors: list[str] = []
+        for compute_type in compute_types:
+            try:
+                self.model = WhisperModel(self.model_id, device=device, compute_type=compute_type)
+                return
+            except Exception as exc:
+                errors.append(f"{compute_type}: {exc}")
+
+        raise BackendUnavailable(
+            "Impossible de charger faster-whisper sur cette machine. " + " | ".join(errors)
+        )
 
     def transcribe(self, wav_path: str, chunk_duration: float, overlap_duration: float) -> TranscriptionResult:
         if self.model is None:
