@@ -206,23 +206,26 @@ def _transcribe_source_item(
             overlap_duration=overlap_duration,
         )
 
+    skipped = False
     try:
         cues = _build_cues_from_result(result, options)
     except RuntimeError:
         fallback_segments = _fallback_segment_from_text(getattr(result, "text", ""), wav_duration_seconds)
         if not fallback_segments:
-            raise
-        cues = build_cues_from_segments(
-            [
-                WordStamp(
-                    start=float(segment["start"]),
-                    end=float(segment["end"]),
-                    text=str(segment["text"]),
-                )
-                for segment in fallback_segments
-            ],
-            options,
-        )
+            skipped = True
+            cues = []
+        else:
+            cues = build_cues_from_segments(
+                [
+                    WordStamp(
+                        start=float(segment["start"]),
+                        end=float(segment["end"]),
+                        text=str(segment["text"]),
+                    )
+                    for segment in fallback_segments
+                ],
+                options,
+            )
     shifted = shift_cues(
         cues,
         source_item.timeline_offset_seconds,
@@ -240,6 +243,7 @@ def _transcribe_source_item(
         "model_id": result.model_id if hasattr(result, "model_id") else request_model_id,
         "text": getattr(result, "text", ""),
         "cue_count": len(shifted),
+        "skipped": skipped,
         "words": [word.__dict__ for word in getattr(result, "words", [])],
         "segments": [segment.__dict__ for segment in getattr(result, "segments", [])],
     }
@@ -401,6 +405,7 @@ def _run_batch_job(job_id: str, request: BatchJobRequest) -> None:
         backend = _get_backend(request.backend, request.model_id)
         all_new_cues: list[SourceCue] = []
         clip_metadata: list[dict[str, Any]] = []
+        skipped_clips: list[str] = []
 
         for index, source_item in enumerate(request.source_items, start=1):
             _set_job(job_id, step=f"Transcription clip {index}/{len(request.source_items)}")
@@ -413,8 +418,18 @@ def _run_batch_job(job_id: str, request: BatchJobRequest) -> None:
                 request.overlap_duration,
                 options,
             )
-            all_new_cues.extend(shifted_cues)
             clip_metadata.append(metadata)
+            if metadata.get("skipped"):
+                skipped_clips.append(metadata["source_label"])
+                continue
+            all_new_cues.extend(shifted_cues)
+
+        if not all_new_cues:
+            if skipped_clips:
+                raise RuntimeError(
+                    "Aucun sous-titre exploitable. Clips ignores: " + ", ".join(skipped_clips)
+                )
+            raise RuntimeError("Aucun sous-titre exploitable.")
 
         _set_job(job_id, step="Fusion SRT/JSON")
         srt_path, json_path = _aggregate_paths(request.output_dir, request.aggregate_label)
@@ -437,6 +452,7 @@ def _run_batch_job(job_id: str, request: BatchJobRequest) -> None:
                 "clip_count": merged_payload["clip_count"],
                 "backend": request.backend,
                 "model_id": request.model_id,
+                "skipped_clips": skipped_clips,
             },
         )
     except Exception as exc:
